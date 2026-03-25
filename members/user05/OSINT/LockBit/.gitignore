@@ -1,0 +1,11 @@
+# 데이터 파일 제외
+data/
+*.json
+!example.json
+
+# Python 캐시
+__pycache__/
+*.pyc
+
+# 로그
+*.log
