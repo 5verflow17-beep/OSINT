@@ -4,12 +4,12 @@ from bs4 import BeautifulSoup
 import pymysql
 import time
 import json
+import re  # 정규표현식 라이브러리 추가
 from dotenv import load_dotenv
 
 # 1. 환경 변수(.env) 로드
 load_dotenv()
 
-# 환경 변수에서 값 가져오기 (코드 보안 유지)
 DB_PWD = os.getenv("DB_PASSWORD")
 WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
@@ -20,23 +20,18 @@ PROXIES = {
 }
 
 TARGET_URL = 'http://lockbit3753ekiocyo5epmpy6klmejchjtzddoekjlnt6mu3qh4de2id.onion/'
+
+# 키워드 리스트
 KEYWORDS = [
-    # [Target] 주요 기업 및 도메인 (정밀 탐지)
     "samsung.com", "hyundai.com", "skhynix", "lgcorp", "navercorp", "kakao",
-    
-    # [Asset] 유출 데이터 성격 (OSINT 강화)
     "database", "leak", "sql_dump", "credential", "passport", "employee_list", 
     "salary", "confidential", "internal_use", "identification",
-    
-    # [Infrastructure] 기술적 취약점 및 접근 정보
     "vpn_config", "rdp_access", "backdoor", "exploit", "root_access",
-    
-    # [Region] 국가 관련 (영문/국문 뉘앙스)
     "republic of korea", "south korea", "korea_leak"
 ]
 
-# 2. MySQL 저장 함수
-def save_to_mysql(title, url, keywords):
+# 2. MySQL 저장 함수 (detected_keywords 컬럼 반영)
+def save_to_mysql(title, url, found_kws):
     try:
         db = pymysql.connect(
             host='localhost',
@@ -47,20 +42,27 @@ def save_to_mysql(title, url, keywords):
         )
         cursor = db.cursor()
         
-        # 상세 URL 컬럼 포함하여 데이터 삽입
-        sql = "INSERT INTO leak_logs (title, url, keywords) VALUES (%s, %s, %s)"
-        cursor.execute(sql, (title, url, ",".join(keywords)))
+        # 💡 [수정] detected_keywords 컬럼을 포함하여 INSERT
+        sql = """
+        INSERT INTO leak_logs (title, url, keywords, detected_keywords) 
+        VALUES (%s, %s, %s, %s)
+        """
+        # keywords에는 첫 번째 발견 단어를, detected_keywords에는 전체 리스트를 저장
+        main_keyword = found_kws[0] if found_kws else "unknown"
+        all_keywords = ",".join(found_kws)
+        
+        cursor.execute(sql, (title, url, main_keyword, all_keywords))
         
         db.commit()
         db.close()
-        print(f"💾 [DB 저장 성공] {title[:20]}...")
+        print(f"💾 [DB 저장 성공] {title[:20]}... (Keywords: {all_keywords})")
     except Exception as e:
         print(f"❌ [DB 저장 실패]: {e}")
 
 # 3. 슬랙 알림 함수
 def send_slack_alert(title, url, found_kws):
     if not WEBHOOK_URL:
-        print("⚠️ 슬랙 Webhook URL이 설정되지 않았습니다. .env 파일을 확인하세요.")
+        print("⚠️ 슬랙 Webhook URL이 설정되지 않았습니다.")
         return
 
     payload = {
@@ -68,7 +70,7 @@ def send_slack_alert(title, url, found_kws):
             {
                 "fallback": "🚨 다크웹 위협 탐지 알림",
                 "color": "#ff0000",
-                "pretext": "🚨 *[OSINT 관제] 다크웹 한국 관련 위협 탐지*",
+                "pretext": "🚨 *[OSINT 관제] 다크웹 정밀 위협 탐지*",
                 "title": f"탐지된 게시물: {title}",
                 "title_link": url,
                 "text": f"*상세 URL:* {url}\n*탐지 키워드:* `{', '.join(found_kws)}`",
@@ -88,8 +90,7 @@ def send_slack_alert(title, url, found_kws):
 # 4. 메인 크롤링 함수
 def start_crawl():
     try:
-        print(f"[*] 다크웹 스캔 시작... (Target: {TARGET_URL})")
-        # Tor 네트워크를 통해 접속
+        print(f"[*] 다크웹 정밀 스캔 시작... (Target: {TARGET_URL})")
         response = requests.get(TARGET_URL, proxies=PROXIES, timeout=90)
         
         if response.status_code == 200:
@@ -104,14 +105,16 @@ def start_crawl():
                 if not href or not text:
                     continue
                 
-                # 키워드 매칭
-                found = [kw for kw in KEYWORDS if kw in text.lower()]
+                # 💡 [수정] 정규표현식을 이용한 대소문자 무시 정밀 매칭
+                found = []
+                for kw in KEYWORDS:
+                    if re.search(re.escape(kw), text, re.IGNORECASE):
+                        found.append(kw)
                 
                 if found:
-                    # 상대 경로를 절대 경로로 변환
                     full_url = href if href.startswith('http') else TARGET_URL.rstrip('/') + '/' + href.lstrip('/')
                     
-                    print(f"🔥 위협 발견: {text}")
+                    print(f"🔥 위협 발견: {text} | 키워드: {found}")
                     save_to_mysql(text, full_url, found)
                     send_slack_alert(text, full_url, found)
             
