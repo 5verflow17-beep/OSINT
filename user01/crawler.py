@@ -6,6 +6,7 @@ import time
 import json
 import re
 from dotenv import load_dotenv
+from datetime import datetime
 
 # 1. 환경 변수(.env) 로드
 load_dotenv()
@@ -30,14 +31,24 @@ KEYWORDS = [
     "republic of korea", "south korea", "korea_leak"
 ]
 
-# 2. 중복 확인 함수 (URL 기준)
+def calculate_severity(found_kws):
+    """탐지된 키워드에 따라 위험도를 자동으로 계산 (서비스용 로직)"""
+    critical_kws = ["leak", "database", "sql_dump", "credential", "root_access", "vpn_config"]
+    # 발견된 키워드 중 크리티컬한 것이 있으면 CRITICAL, 아니면 개수에 따라 차등
+    if any(ckw in found_kws for ckw in critical_kws):
+        return "CRITICAL"
+    elif len(found_kws) >= 2:
+        return "HIGH"
+    return "MEDIUM"
+
 def is_already_collected(cursor, url):
+    """DB에서 동일한 URL이 이미 수집되었는지 확인 (중복 방지)"""
     sql = "SELECT id FROM leak_logs WHERE url = %s"
     cursor.execute(sql, (url,))
     return cursor.fetchone() is not None
 
-# 3. MySQL 저장 함수
-def save_to_mysql(title, url, found_kws):
+def save_to_mysql(title, url, found_kws, severity):
+    """신규 컬럼(severity, status)을 포함하여 데이터 저장"""
     try:
         db = pymysql.connect(
             host='localhost',
@@ -48,15 +59,14 @@ def save_to_mysql(title, url, found_kws):
         )
         cursor = db.cursor()
         
-        # 정밀 탐지된 키워드들을 콤마로 합쳐서 저장
         main_keyword = found_kws[0] if found_kws else "unknown"
         all_keywords = ",".join(found_kws)
         
         sql = """
-        INSERT INTO leak_logs (title, url, keywords, detected_keywords) 
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO leak_logs (title, url, keywords, detected_keywords, severity, status, detect_time) 
+        VALUES (%s, %s, %s, %s, %s, %s, NOW())
         """
-        cursor.execute(sql, (title, url, main_keyword, all_keywords))
+        cursor.execute(sql, (title, url, main_keyword, all_keywords, severity, 'NEW'))
         
         db.commit()
         db.close()
@@ -65,19 +75,20 @@ def save_to_mysql(title, url, found_kws):
         print(f"❌ [DB 저장 실패]: {e}")
         return False
 
-# 4. 슬랙 알림 함수
-def send_slack_alert(title, url, found_kws):
-    if not WEBHOOK_URL:
-        # 알림을 꺼두셨을 때 터미널에만 출력
-        print(f"ℹ️ [알림 스킵] 슬랙 URL 없음: {title[:20]}...")
-        return
+def send_slack_alert(title, url, found_kws, severity):
+    """위험도(Severity)에 따라 색상이 변하는 슬랙 알림"""
+    if not WEBHOOK_URL: return
+
+    # 위험도별 색상 설정
+    color_map = {"CRITICAL": "#ff0000", "HIGH": "#ff8c00", "MEDIUM": "#ffeb3b"}
+    color = color_map.get(severity, "#808080")
 
     payload = {
         "attachments": [
             {
-                "fallback": "🚨 다크웹 신규 위협 탐지",
-                "color": "#ff0000",
-                "pretext": "🚨 *[OSINT 관제] 신규 위협이 탐지되었습니다*",
+                "fallback": f"🚨 [{severity}] 위협 탐지",
+                "color": color,
+                "pretext": f"🚨 *[OSINT 관제] {severity} 등급 위협 탐지*",
                 "title": f"게시물: {title}",
                 "title_link": url,
                 "text": f"*상세 URL:* {url}\n*탐지 키워드:* `{', '.join(found_kws)}`",
@@ -89,21 +100,19 @@ def send_slack_alert(title, url, found_kws):
     
     try:
         requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={'Content-Type': 'application/json'})
-        print("🔔 [슬랙 알림] 전송 완료!")
+        print(f"🔔 [슬랙 알림] 전송 완료! ({severity})")
     except Exception as e:
         print(f"⚠️ [슬랙 에러]: {e}")
 
-# 5. 메인 크롤링 함수
 def start_crawl():
     try:
-        print(f"[*] 스캔 시작: {TARGET_URL}")
+        print(f"[*] 스캔 시작: {TARGET_URL} ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
         response = requests.get(TARGET_URL, proxies=PROXIES, timeout=90)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             links = soup.find_all('a')
             
-            # DB 연결 (중복 체크용)
             db = pymysql.connect(host='localhost', user='root', password=DB_PWD, db='osint_db')
             cursor = db.cursor()
 
@@ -111,26 +120,29 @@ def start_crawl():
             for link in links:
                 href = link.get('href')
                 text = link.get_text().strip()
-                
                 if not href or not text: continue
                 
-                # 대소문자 무시 정밀 매칭
+                # 정규표현식 정밀 탐지
                 found = [kw for kw in KEYWORDS if re.search(re.escape(kw), text, re.IGNORECASE)]
                 
                 if found:
                     full_url = href if href.startswith('http') else TARGET_URL.rstrip('/') + '/' + href.lstrip('/')
                     
-                    # 💡 [중복 체크] 이미 DB에 있으면 저장/알림 스킵
+                    # 💡 [핵심] 중복 체크: 이미 있으면 다음 루프로 점프
                     if is_already_collected(cursor, full_url):
                         continue
                     
-                    # 새로운 정보일 때만 실행
-                    if save_to_mysql(text, full_url, found):
-                        send_slack_alert(text, full_url, found)
+                    # 위험도 계산
+                    severity = calculate_severity(found)
+                    
+                    # 신규 데이터 저장 및 알림
+                    if save_to_mysql(text, full_url, found, severity):
+                        send_slack_alert(text, full_url, found, severity)
                         new_count += 1
+                        print(f"🔥 신규 탐지 [{severity}]: {text[:20]}...")
             
             db.close()
-            print(f"[+] 스캔 완료. 신규 데이터 {new_count}건 발견.")
+            print(f"[+] 스캔 완료. 신규 데이터 {new_count}건 수집됨.")
         else:
             print(f"❌ 접속 실패: {response.status_code}")
             
