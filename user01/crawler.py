@@ -20,7 +20,20 @@ PROXIES = {
 }
 
 TARGET_URL = 'http://lockbit3753ekiocyo5epmpy6klmejchjtzddoekjlnt6mu3qh4de2id.onion/'
-KEYWORDS = ["korea", "samsung", "lg", "sk", "hyundai", "seoul"]
+KEYWORDS = [
+    # [Target] 주요 기업 및 도메인 (정밀 탐지)
+    "samsung.com", "hyundai.com", "skhynix", "lgcorp", "navercorp", "kakao",
+    
+    # [Asset] 유출 데이터 성격 (OSINT 강화)
+    "database", "leak", "sql_dump", "credential", "passport", "employee_list", 
+    "salary", "confidential", "internal_use", "identification",
+    
+    # [Infrastructure] 기술적 취약점 및 접근 정보
+    "vpn_config", "rdp_access", "backdoor", "exploit", "root_access",
+    
+    # [Region] 국가 관련 (영문/국문 뉘앙스)
+    "republic of korea", "south korea", "korea_leak"
+]
 
 # 2. MySQL 저장 함수
 def save_to_mysql(title, url, keywords):
