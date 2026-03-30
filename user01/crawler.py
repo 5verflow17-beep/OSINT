@@ -52,6 +52,48 @@ def get_db_connection():
         cursorclass=pymysql.cursors.DictCursor
     )
 
+# --- [신규 추가: 웹 메시지 전송 버튼용 함수] ---
+def send_manual_summary():
+    """웹에서 버튼 클릭 시 호출: 현재 DB의 전체 통계를 요약하여 슬랙 전송"""
+    print(f"[*] 사용자 요청에 의한 실시간 요약 보고서 전송 시작...")
+    try:
+        db = get_db_connection()
+        with db.cursor() as cursor:
+            # 실시간 DB 데이터 기반 등급별 전체 카운트 조회
+            cursor.execute("SELECT severity, COUNT(*) as count FROM leak_logs GROUP BY severity")
+            rows = cursor.fetchall()
+            stats = {row['severity']: row['count'] for row in rows}
+            total_count = sum(stats.values())
+            
+            # 최근 24시간 내 신규 탐지 건수 추가 조회 (보고서 퀄리티 향상)
+            cursor.execute("SELECT COUNT(*) as count FROM leak_logs WHERE detect_time > NOW() - INTERVAL 1 DAY")
+            new_24h = cursor.fetchone()['count']
+
+        payload = {
+            "attachments": [{
+                "color": "#7B1FA2", # 보라색 (수동 보고서 전용 색상)
+                "pretext": f"📊 *사용자 요청: 실시간 위협 모니터링 요약 보고*",
+                "text": (f"관리자 요청에 의해 생성된 현재 시스템 리포트입니다.\n\n"
+                         f"*최근 24시간 신규:* {new_24h}건\n"
+                         f"*전체 DB 탐지 총계:* {total_count}건\n"
+                         f"🔴 CRITICAL: {stats.get('CRITICAL', 0)}건\n"
+                         f"🟠 HIGH: {stats.get('HIGH', 0)}건\n"
+                         f"🟡 MEDIUM: {stats.get('MEDIUM', 0)}건\n"
+                         f"🟢 LOW: {stats.get('LOW', 0)}건"),
+                "footer": "OSINT Manual Report System",
+                "ts": int(time.time())
+            }]
+        }
+        
+        # 한글 깨짐 방지를 위해 ensure_ascii=False 및 utf-8 인코딩 적용
+        response = requests.post(WEBHOOK_URL, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'), headers={'Content-Type': 'application/json'})
+        
+        if response.status_code == 200:
+            print(f"      ✅ 사용자 요청 요약 보고서 전송 완료!")
+        db.close()
+    except Exception as e:
+        print(f"\n⚠️ 요약 보고서 전송 중 오류 발생: {e}")
+
 def calculate_severity(found_kws):
     """탐지 키워드 조합에 따른 위험 등급 산출 로직"""
     critical_kws = ["leak", "database", "sql_dump", "credential", "confidential"]
@@ -95,7 +137,8 @@ def send_slack_alert(title, url, found_kws, severity):
     }
 
     try:
-        response = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={'Content-Type': 'application/json'})
+        # 한글 인코딩 수정 반영
+        response = requests.post(WEBHOOK_URL, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'), headers={'Content-Type': 'application/json'})
         # 슬랙 서버 응답 확인 후 터미널 로그 출력
         if response.status_code == 200:
             print(f"      ✅ 슬랙 메시지 전송 완료! (등급: {severity})")
@@ -148,7 +191,7 @@ def send_summary_report(new_count):
             }]
         }
         
-        response = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={'Content-Type': 'application/json'})
+        response = requests.post(WEBHOOK_URL, data=json.dumps(payload, ensure_ascii=False).encode('utf-8'), headers={'Content-Type': 'application/json'})
         # 요약 보고서 전송 시에도 터미널에 상태 출력
         if response.status_code == 200:
             print(f"\n      ✅ 슬랙 요약 보고서 전송 완료! (신규: {new_count}건)")
@@ -246,4 +289,6 @@ def start_crawl():
 
 if __name__ == "__main__":
     # 스크립트 실행 진입점
+    # 1. 일반 크롤링 실행 시: start_crawl()
+    # 2. 웹에서 버튼 눌러 보고서만 보낼 시: send_manual_summary() 호출 필요
     start_crawl()
