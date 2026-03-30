@@ -163,7 +163,15 @@ def get_threats():
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT id, title, url as source, keywords, 
-                DATE_FORMAT(detect_time, '%m/%d %H:%i') as datetime 
+                DATE_FORMAT(detect_time, '%m/%d %H:%i') as datetime,
+                detect_time,
+                CASE 
+                    WHEN keywords LIKE '%critical%' THEN 95
+                    WHEN keywords LIKE '%breach%' OR keywords LIKE '%data%' THEN 85
+                    WHEN keywords LIKE '%leak%' THEN 75
+                    WHEN keywords LIKE '%korea%' OR keywords LIKE '%samsung%' THEN 70
+                    ELSE 50
+                END as risk_score
                 FROM leak_logs 
                 ORDER BY detect_time DESC LIMIT 100
             """)
@@ -179,6 +187,76 @@ def get_threats():
                 row['keywords'] = []
         
         return jsonify({'status': 'ok', 'data': rows})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/threats/<int:threat_id>', methods=['GET'])
+def get_threat_detail(threat_id):
+    """특정 위협 상세 정보"""
+    try:
+        connection = pymysql.connect(**DB_CONFIG)
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, title, url as source, keywords, detect_time
+                FROM leak_logs 
+                WHERE id = %s
+            """, (threat_id,))
+            row = cursor.fetchone()
+        
+        if not row:
+            return jsonify({'status': 'error', 'message': 'Threat not found'}), 404
+        
+        connection.close()
+        
+        # Parse keywords
+        keywords_str = row.get('keywords', '')
+        if isinstance(keywords_str, str) and keywords_str:
+            keywords_list = [kw.strip() for kw in keywords_str.split(',') if kw.strip()]
+        else:
+            keywords_list = []
+        
+        # Format datetime safely
+        detect_time = row.get('detect_time')
+        datetime_str = str(detect_time) if detect_time else ''
+        
+        result = {
+            'id': row.get('id'),
+            'title': row.get('title', ''),
+            'source': row.get('source', ''),
+            'keywords': keywords_list,
+            'content': row.get('title', ''),
+            'datetime': datetime_str,
+            'risk_score': 75
+        }
+        
+        return jsonify({'status': 'ok', 'data': result})
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/crawler/next-run', methods=['GET'])
+def get_next_crawl_time():
+    """다음 크롤링 시간 정보"""
+    try:
+        # 실제로는 DB의 크롤러 스케줄 테이블에서 가져와야 함
+        # 지금은 예시로 항상 다음 5분마다라고 반환
+        from datetime import datetime as dt, timedelta
+        
+        # 현재 시간 기준으로 다음 5분 마크 계산 (매 정각/5분 단위)
+        now = dt.now()
+        minutes_to_next = 5 - (now.minute % 5)
+        if minutes_to_next == 0:
+            minutes_to_next = 5
+        next_run = now + timedelta(minutes=minutes_to_next)
+        
+        return jsonify({
+            'status': 'ok',
+            'data': {
+                'next_run': next_run.isoformat(),
+                'interval_seconds': 300
+            }
+        })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
