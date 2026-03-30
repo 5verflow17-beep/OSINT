@@ -8,6 +8,7 @@ import re
 from dotenv import load_dotenv
 from datetime import datetime
 
+# --- [기존 설정값 유지] ---
 SCAN_MODE = "SMART"    # "SMART": 중복 시 종료 (평상시) / "FULL": 전체 스캔 (전수 조사용)
 MAX_PAGES = 50        # 스캔할 최대 페이지 수
 TIMEOUT_SEC = 30      # Tor 응답 대기 시간 (너무 길면 프리징처럼 보임)
@@ -116,8 +117,11 @@ def check_detail_content(url):
         return []
 
 def send_summary_report(new_count):
-    """스캔 프로세스 종료 후 등급별 통계 요약 보고"""
-    if not WEBHOOK_URL:
+    """스캔 프로세스 종료 후 등급별 통계 요약 보고 (새로운 알림이 있을 때만 실행)"""
+    # [수정] 새로운 알림이 0건이면 보고서를 보내지 않음
+    if not WEBHOOK_URL or new_count == 0:
+        if new_count == 0:
+            print("\n[-] 새로운 탐색 결과가 없어 요약 보고서를 전송하지 않습니다.")
         return
 
     try:
@@ -233,7 +237,7 @@ def start_crawl():
                 current_page += 1
 
         db.close()
-        # 최종 요약 보고서 발송 및 종료 안내
+        # 최종 요약 보고서 발송 (새로운 알림이 있을 때만 동작하도록 내부 로직 반영됨)
         send_summary_report(new_count)
         print(f"\n[+] 모든 스캔 프로세스가 완료되었습니다.")
 
