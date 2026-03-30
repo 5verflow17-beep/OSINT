@@ -43,14 +43,14 @@ def get_summary_stats():
             total = cursor.fetchone()['total']
             
             # 24시간 신규 위협
-            cursor.execute("SELECT COUNT(*) as new_24h FROM leak_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)")
+            cursor.execute("SELECT COUNT(*) as new_24h FROM leak_logs WHERE detect_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)")
             new_24h = cursor.fetchone()['new_24h']
             
             # 어제와 비교한 증감률
             cursor.execute("""
                 SELECT 
-                    SUM(CASE WHEN DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) as today,
-                    SUM(CASE WHEN DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) THEN 1 ELSE 0 END) as yesterday
+                    SUM(CASE WHEN DATE(detect_time) = CURDATE() THEN 1 ELSE 0 END) as today,
+                    SUM(CASE WHEN DATE(detect_time) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) THEN 1 ELSE 0 END) as yesterday
                 FROM leak_logs
             """)
             result = cursor.fetchone()
@@ -78,11 +78,11 @@ def get_daily_stats():
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT 
-                    DATE(created_at) as date,
+                    DATE(detect_time) as date,
                     COUNT(*) as count
                 FROM leak_logs
-                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                GROUP BY DATE(created_at)
+                WHERE detect_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                GROUP BY DATE(detect_time)
                 ORDER BY date ASC
             """)
             rows = cursor.fetchall()
@@ -103,11 +103,11 @@ def get_hourly_stats():
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT 
-                    HOUR(created_at) as hour,
+                    HOUR(detect_time) as hour,
                     COUNT(*) as count
                 FROM leak_logs
-                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-                GROUP BY HOUR(created_at)
+                WHERE detect_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                GROUP BY HOUR(detect_time)
                 ORDER BY hour ASC
             """)
             rows = cursor.fetchall()
@@ -163,9 +163,9 @@ def get_threats():
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT id, title, url as source, keywords, 
-                DATE_FORMAT(created_at, '%m/%d %H:%i') as datetime 
+                DATE_FORMAT(detect_time, '%m/%d %H:%i') as datetime 
                 FROM leak_logs 
-                ORDER BY created_at DESC LIMIT 100
+                ORDER BY detect_time DESC LIMIT 100
             """)
             rows = cursor.fetchall()
         connection.close()
