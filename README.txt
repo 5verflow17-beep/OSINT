@@ -1,6 +1,6 @@
 [ 5verflow 팀원 계정 배정 현황 ]
-User01: 김상겸 (조장)
-User02: 장보근 (아키텍트)
+User01: 김상겸 
+User02: 장보근 
 User03: 전혜린
 User04: 신서영
 User05: 박소연
