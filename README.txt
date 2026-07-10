@@ -48,15 +48,4 @@ Backend: Python, Flask, BeautifulSoup4, PyMySQL, Tor Proxy
 Frontend: React, TypeScript, Recharts, Tailwind CSS
 Database / Infra: MySQL, AWS EC2 (Ubuntu)
 Alert: Slack
-나의 주요 기여 (인프라 중심)
-AWS EC2 서버 안정적 구축 및 운영 (m7i-flex.large 사양)
-팀원들이 동시에 개발할 수 있도록 계정 격리 및 개발 환경 통합 구성
-이전 프로젝트(OSINT 1차) 경험을 바탕으로 발생할 수 있는 충돌 문제를 사전에 방지
-크롤러 실행 및 대시보드 연동을 위한 서버 환경 최적화
-(여기에 AWS EC2 터미널, crawler.py 실행 화면, 서버 파일 구조 이미지 삽입 추천)
 
-프로젝트 결과물
-(아래 이미지들 삽입)
-
-React 대시보드 (위협 통계, 키워드 분석, 시간대별 분포)
-Slack 실시간 알림 예시
